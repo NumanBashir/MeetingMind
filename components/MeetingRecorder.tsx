@@ -20,6 +20,7 @@ import {
   UserRound,
 } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
+import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PublicEnvStatus } from "@/lib/env";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
@@ -145,6 +146,7 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [meetingTitle, setMeetingTitle] = useState("Untitled meeting");
   const [language, setLanguage] = useState("English");
+  const [hasRecordingConsent, setHasRecordingConsent] = useState(false);
   const [meetingDrafts, setMeetingDrafts] = useState<MeetingDraft[]>([]);
   const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
   const [recordingError, setRecordingError] = useState<string | null>(null);
@@ -489,6 +491,11 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
 
   async function startRecording() {
     setRecordingError(null);
+
+    if (!hasRecordingConsent) {
+      setRecordingError("Confirm participant awareness before recording.");
+      return;
+    }
 
     if (!("MediaRecorder" in window) || !navigator.mediaDevices?.getUserMedia) {
       setRecordingError("This browser does not support microphone recording.");
@@ -1040,11 +1047,21 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
     <main className="min-h-screen px-4 py-5 sm:px-6 lg:px-8">
       <div className="mx-auto flex min-h-[calc(100vh-2.5rem)] w-full max-w-6xl flex-col gap-5">
         <header className="flex flex-col gap-4 border-b border-ink/10 pb-5 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-sm font-semibold uppercase text-ocean">MeetingMind</p>
-            <h1 className="mt-2 text-3xl font-semibold text-ink sm:text-4xl">
-              Meeting recorder
-            </h1>
+          <div className="flex items-center gap-4">
+            <Image
+              alt="MeetingMind"
+              className="h-14 w-14 rounded-lg border border-ink/10 object-cover shadow-sm"
+              height={56}
+              priority
+              src="/meetingmind-logo.png"
+              width={56}
+            />
+            <div>
+              <p className="text-sm font-semibold uppercase text-ocean">MeetingMind</p>
+              <h1 className="mt-1 text-3xl font-semibold text-ink sm:text-4xl">
+                Meeting recorder
+              </h1>
+            </div>
           </div>
           <div className="flex items-center gap-2 rounded-full border border-ink/10 bg-white/75 px-4 py-2 text-sm font-medium text-graphite shadow-sm">
             <span
@@ -1092,7 +1109,7 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
                     Duration
                   </div>
                   <p className="mt-3 font-mono text-4xl font-semibold text-ink">
-                    {formatDuration(elapsedSeconds)}
+                    {formatDuration(displayedDuration)}
                   </p>
                 </div>
 
@@ -1125,10 +1142,21 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
             </div>
 
             <div className="mt-8 flex flex-col gap-3 border-t border-ink/10 pt-5 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-sm text-graphite">
-                {isRecording
-                  ? "Recording audio from your microphone."
-                  : "Start a recording to create a local audio file."}
+              <div className="grid gap-2 text-sm text-graphite">
+                <p>
+                  {isRecording
+                    ? "Recording audio from your microphone."
+                    : "Start a recording to create a local audio file."}
+                </p>
+                <label className="flex max-w-xl items-start gap-2 text-sm font-medium text-graphite">
+                  <input
+                    checked={hasRecordingConsent}
+                    className="mt-1 h-4 w-4 rounded border-ink/20 text-ocean focus:ring-ocean"
+                    onChange={(event) => setHasRecordingConsent(event.target.checked)}
+                    type="checkbox"
+                  />
+                  Participants are aware this meeting may be recorded and transcribed.
+                </label>
               </div>
               <div className="flex gap-3">
                 <button
@@ -1157,7 +1185,7 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
                 ) : (
                   <button
                     className="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-coral px-5 text-sm font-semibold text-white transition hover:bg-[#dc654f] disabled:opacity-55"
-                    disabled={isPreparing}
+                    disabled={isPreparing || !hasRecordingConsent}
                     onClick={startRecording}
                     type="button"
                   >
@@ -1376,9 +1404,18 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
           </div>
 
           <aside className="grid content-start gap-4 rounded-lg border border-ink/10 bg-ink p-5 text-white shadow-panel sm:p-6">
-            <div>
-              <p className="text-sm font-semibold uppercase text-mint">Current meeting</p>
-              <h2 className="mt-2 break-words text-2xl font-semibold">{displayedTitle}</h2>
+            <div className="flex items-start gap-3">
+              <Image
+                alt="MeetingMind"
+                className="h-10 w-10 rounded-md border border-white/12 object-cover"
+                height={40}
+                src="/meetingmind-logo.png"
+                width={40}
+              />
+              <div className="min-w-0">
+                <p className="text-sm font-semibold uppercase text-mint">Current meeting</p>
+                <h2 className="mt-2 break-words text-2xl font-semibold">{displayedTitle}</h2>
+              </div>
             </div>
 
             <dl className="grid gap-3 text-sm">
@@ -1411,8 +1448,9 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
             </dl>
 
             <div className="rounded-md bg-white/9 p-4 text-sm leading-6 text-white/78">
-              Saved meetings store audio and metadata now. Transcript, summary,
-              action items, decisions, and topics come next.
+              {displayedDuration >= 3600
+                ? "Long recording detected. Save before leaving this tab."
+                : "Saved meetings store audio, transcript, summary, action items, decisions, and topics."}
             </div>
 
             <div className="border-t border-white/12 pt-4">

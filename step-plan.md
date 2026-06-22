@@ -15,6 +15,7 @@ This plan turns `masterplan.md` into an implementation sequence. Each step shoul
 * Step 9: Speaker separation - Skipped for now
 * Step 10: AI meeting notes - Done
 * Step 11: Export - Next
+* Step 12: Mobile and product polish - Done out of order
 
 ---
 
@@ -355,7 +356,7 @@ Acceptance checks:
 
 ## Step 12: Mobile And Product Polish
 
-Status: Planned
+Status: Done out of order
 
 Goal:
 Make the MVP pleasant and reliable on phones and desktop.
@@ -367,6 +368,16 @@ Scope:
 * Error states
 * Recording guidance
 * Performance checks for longer meetings
+
+Implemented:
+
+* Added uploaded MeetingMind logo to app branding
+* Added favicon/app icon/apple icon assets
+* Added Open Graph image metadata
+* Added recording consent confirmation before recording
+* Improved current meeting branding panel
+* Added long-recording guidance in the status panel
+* Kept responsive controls wrapped for small screens
 
 Acceptance checks:
 
