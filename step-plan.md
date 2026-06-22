@@ -12,7 +12,9 @@ This plan turns `masterplan.md` into an implementation sequence. Each step shoul
 * Step 6: Authentication - Done
 * Step 7: Persistent recording storage - Done
 * Step 8: Transcription - Done
-* Step 9: Speaker separation - Next
+* Step 9: Speaker separation - Skipped for now
+* Step 10: AI meeting notes - Done
+* Step 11: Export - Next
 
 ---
 
@@ -279,7 +281,7 @@ Acceptance checks:
 
 ## Step 9: Speaker Separation
 
-Status: Next
+Status: Skipped for now
 
 Goal:
 Improve transcript readability with generic speaker labels.
@@ -299,7 +301,7 @@ Acceptance checks:
 
 ## Step 10: AI Meeting Notes
 
-Status: Planned
+Status: Done
 
 Goal:
 Generate useful meeting outputs from the transcript.
@@ -312,6 +314,16 @@ Scope:
 * Topics discussed
 * Editable generated notes
 
+Implemented:
+
+* Added guarded `OPENAI_NOTES_MODEL` config
+* Added `/api/generate-notes`
+* Generates structured notes from saved transcript text
+* Stores summary, decisions, and topics in `meeting_notes`
+* Stores action items in `action_items`
+* Loads notes with saved meetings
+* Allows editing and saving summary, action items, decisions, and topics
+
 Acceptance checks:
 
 * User can generate notes from a transcript
@@ -322,7 +334,7 @@ Acceptance checks:
 
 ## Step 11: Export
 
-Status: Planned
+Status: Next
 
 Goal:
 Let users take meeting information out of the app.

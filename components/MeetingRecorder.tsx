@@ -52,6 +52,11 @@ type SavedMeeting = MeetingRow & {
   signedAudioUrl: string | null;
   transcriptContent: string;
   transcriptUpdatedAt: string | null;
+  summary: string;
+  decisions: string[];
+  topics: string[];
+  actionItems: string[];
+  notesUpdatedAt: string | null;
 };
 
 type MeetingRecorderProps = {
@@ -127,6 +132,13 @@ function createDraftId() {
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function parseLines(value: string) {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [isPreparing, setIsPreparing] = useState(false);
@@ -149,7 +161,13 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
   const [transcribingMeetingId, setTranscribingMeetingId] = useState<string | null>(null);
   const [savingTranscriptMeetingId, setSavingTranscriptMeetingId] = useState<string | null>(null);
   const [savingTitleMeetingId, setSavingTitleMeetingId] = useState<string | null>(null);
+  const [generatingNotesMeetingId, setGeneratingNotesMeetingId] = useState<string | null>(null);
+  const [savingNotesMeetingId, setSavingNotesMeetingId] = useState<string | null>(null);
   const [transcriptDraft, setTranscriptDraft] = useState("");
+  const [summaryDraft, setSummaryDraft] = useState("");
+  const [actionItemsDraft, setActionItemsDraft] = useState("");
+  const [decisionsDraft, setDecisionsDraft] = useState("");
+  const [topicsDraft, setTopicsDraft] = useState("");
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -342,9 +360,65 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
           },
         ]),
       );
+      const { data: notesRows, error: notesError } =
+        meetingIds.length > 0
+          ? await supabaseClient
+              .from("meeting_notes")
+              .select("meeting_id, summary, decisions, topics, updated_at")
+              .in("meeting_id", meetingIds)
+          : { data: [], error: null };
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (notesError) {
+        setSavedMeetingError(notesError.message);
+        setIsSavedMeetingsLoading(false);
+        return;
+      }
+
+      const notesByMeetingId = new Map(
+        (notesRows ?? []).map((row) => [
+          row.meeting_id,
+          {
+            summary: row.summary ?? "",
+            decisions: row.decisions,
+            topics: row.topics,
+            updatedAt: row.updated_at,
+          },
+        ]),
+      );
+      const { data: actionItemRows, error: actionItemsError } =
+        meetingIds.length > 0
+          ? await supabaseClient
+              .from("action_items")
+              .select("meeting_id, text")
+              .in("meeting_id", meetingIds)
+              .order("created_at", { ascending: true })
+          : { data: [], error: null };
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (actionItemsError) {
+        setSavedMeetingError(actionItemsError.message);
+        setIsSavedMeetingsLoading(false);
+        return;
+      }
+
+      const actionItemsByMeetingId = new Map<string, string[]>();
+      (actionItemRows ?? []).forEach((row) => {
+        const current = actionItemsByMeetingId.get(row.meeting_id) ?? [];
+        current.push(row.text);
+        actionItemsByMeetingId.set(row.meeting_id, current);
+      });
       const meetingsWithAudio = await Promise.all(
         meetings.map(async (meeting): Promise<SavedMeeting> => {
           const transcript = transcriptByMeetingId.get(meeting.id);
+          const notes = notesByMeetingId.get(meeting.id);
+          const actionItems = actionItemsByMeetingId.get(meeting.id) ?? [];
 
           if (!meeting.audio_path) {
             return {
@@ -352,6 +426,11 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
               signedAudioUrl: null,
               transcriptContent: transcript?.content ?? "",
               transcriptUpdatedAt: transcript?.updatedAt ?? null,
+              summary: notes?.summary ?? "",
+              decisions: notes?.decisions ?? [],
+              topics: notes?.topics ?? [],
+              actionItems,
+              notesUpdatedAt: notes?.updatedAt ?? null,
             };
           }
 
@@ -364,6 +443,11 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
             signedAudioUrl: signedUrlData?.signedUrl ?? null,
             transcriptContent: transcript?.content ?? "",
             transcriptUpdatedAt: transcript?.updatedAt ?? null,
+            summary: notes?.summary ?? "",
+            decisions: notes?.decisions ?? [],
+            topics: notes?.topics ?? [],
+            actionItems,
+            notesUpdatedAt: notes?.updatedAt ?? null,
           };
         }),
       );
@@ -389,6 +473,19 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
   useEffect(() => {
     setTranscriptDraft(selectedSavedMeeting?.transcriptContent ?? "");
   }, [selectedSavedMeeting?.id, selectedSavedMeeting?.transcriptContent]);
+
+  useEffect(() => {
+    setSummaryDraft(selectedSavedMeeting?.summary ?? "");
+    setActionItemsDraft((selectedSavedMeeting?.actionItems ?? []).join("\n"));
+    setDecisionsDraft((selectedSavedMeeting?.decisions ?? []).join("\n"));
+    setTopicsDraft((selectedSavedMeeting?.topics ?? []).join("\n"));
+  }, [
+    selectedSavedMeeting?.id,
+    selectedSavedMeeting?.summary,
+    selectedSavedMeeting?.actionItems,
+    selectedSavedMeeting?.decisions,
+    selectedSavedMeeting?.topics,
+  ]);
 
   async function startRecording() {
     setRecordingError(null);
@@ -745,6 +842,148 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
     setSavingTitleMeetingId(null);
   }
 
+  async function generateNotes(meeting: SavedMeeting) {
+    if (!supabase) {
+      setSavedMeetingError("Supabase is not configured.");
+      return;
+    }
+
+    if (!meeting.transcriptContent.trim()) {
+      setSavedMeetingError("Transcribe this meeting before generating notes.");
+      return;
+    }
+
+    setGeneratingNotesMeetingId(meeting.id);
+    setSavedMeetingError(null);
+
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+
+    if (sessionError || !session) {
+      setSavedMeetingError(sessionError?.message ?? "Sign in before generating notes.");
+      setGeneratingNotesMeetingId(null);
+      return;
+    }
+
+    const response = await fetch("/api/generate-notes", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ meetingId: meeting.id }),
+    });
+    const data = (await response.json()) as {
+      notes?: {
+        summary: string;
+        actionItems: string[];
+        decisions: string[];
+        topics: string[];
+      };
+      updatedAt?: string;
+      error?: string;
+    };
+
+    if (!response.ok || !data.notes) {
+      setSavedMeetingError(data.error ?? "Could not generate meeting notes.");
+      setGeneratingNotesMeetingId(null);
+      return;
+    }
+
+    const updatedAt = data.updatedAt ?? new Date().toISOString();
+    setSavedMeetings((current) =>
+      current.map((item) =>
+        item.id === meeting.id
+          ? {
+              ...item,
+              summary: data.notes?.summary ?? "",
+              actionItems: data.notes?.actionItems ?? [],
+              decisions: data.notes?.decisions ?? [],
+              topics: data.notes?.topics ?? [],
+              notesUpdatedAt: updatedAt,
+            }
+          : item,
+      ),
+    );
+    setSummaryDraft(data.notes.summary);
+    setActionItemsDraft(data.notes.actionItems.join("\n"));
+    setDecisionsDraft(data.notes.decisions.join("\n"));
+    setTopicsDraft(data.notes.topics.join("\n"));
+    setGeneratingNotesMeetingId(null);
+  }
+
+  async function saveNotes(meeting: SavedMeeting) {
+    if (!supabase) {
+      setSavedMeetingError("Supabase is not configured.");
+      return;
+    }
+
+    setSavingNotesMeetingId(meeting.id);
+    setSavedMeetingError(null);
+
+    const decisions = parseLines(decisionsDraft);
+    const topics = parseLines(topicsDraft);
+    const actionItems = parseLines(actionItemsDraft);
+    const updatedAt = new Date().toISOString();
+    const { error: notesError } = await supabase.from("meeting_notes").upsert({
+      meeting_id: meeting.id,
+      summary: summaryDraft,
+      decisions,
+      topics,
+      updated_at: updatedAt,
+    });
+
+    if (notesError) {
+      setSavedMeetingError(notesError.message);
+      setSavingNotesMeetingId(null);
+      return;
+    }
+
+    const { error: deleteError } = await supabase
+      .from("action_items")
+      .delete()
+      .eq("meeting_id", meeting.id);
+
+    if (deleteError) {
+      setSavedMeetingError(deleteError.message);
+      setSavingNotesMeetingId(null);
+      return;
+    }
+
+    if (actionItems.length > 0) {
+      const { error: insertError } = await supabase.from("action_items").insert(
+        actionItems.map((text) => ({
+          meeting_id: meeting.id,
+          text,
+        })),
+      );
+
+      if (insertError) {
+        setSavedMeetingError(insertError.message);
+        setSavingNotesMeetingId(null);
+        return;
+      }
+    }
+
+    setSavedMeetings((current) =>
+      current.map((item) =>
+        item.id === meeting.id
+          ? {
+              ...item,
+              summary: summaryDraft,
+              actionItems,
+              decisions,
+              topics,
+              notesUpdatedAt: updatedAt,
+            }
+          : item,
+      ),
+    );
+    setSavingNotesMeetingId(null);
+  }
+
   const displayedTitle = selectedDraft?.title ?? selectedSavedMeeting?.title ?? meetingTitle;
   const displayedLanguage = selectedDraft?.language ?? selectedSavedMeeting?.language ?? language;
   const displayedDuration =
@@ -1052,6 +1291,82 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
                             Updated {formatDraftDate(selectedSavedMeeting.transcriptUpdatedAt)}
                           </span>
                         )}
+                      </div>
+                    </div>
+                    <div className="grid gap-3 border-t border-ink/10 pt-4">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <button
+                          className="inline-flex h-11 w-fit items-center justify-center gap-2 rounded-md bg-ocean px-4 text-sm font-semibold text-white transition hover:bg-[#245b76] disabled:opacity-55"
+                          disabled={
+                            generatingNotesMeetingId === selectedSavedMeeting.id ||
+                            !selectedSavedMeeting.transcriptContent.trim()
+                          }
+                          onClick={() => generateNotes(selectedSavedMeeting)}
+                          type="button"
+                        >
+                          <FileText className="h-4 w-4" />
+                          {generatingNotesMeetingId === selectedSavedMeeting.id
+                            ? "Generating notes"
+                            : selectedSavedMeeting.summary
+                              ? "Regenerate notes"
+                              : "Generate notes"}
+                        </button>
+                        <button
+                          className="inline-flex h-11 w-fit items-center justify-center gap-2 rounded-md border border-ink/15 bg-white px-4 text-sm font-semibold text-graphite transition hover:border-ocean/50 hover:text-ocean disabled:opacity-55"
+                          disabled={savingNotesMeetingId === selectedSavedMeeting.id}
+                          onClick={() => saveNotes(selectedSavedMeeting)}
+                          type="button"
+                        >
+                          <Save className="h-4 w-4" />
+                          {savingNotesMeetingId === selectedSavedMeeting.id
+                            ? "Saving notes"
+                            : "Save notes"}
+                        </button>
+                        {selectedSavedMeeting.notesUpdatedAt && (
+                          <span className="text-sm font-medium text-graphite">
+                            Notes updated {formatDraftDate(selectedSavedMeeting.notesUpdatedAt)}
+                          </span>
+                        )}
+                      </div>
+
+                      <label className="grid gap-2">
+                        <span className="text-sm font-semibold text-graphite">Summary</span>
+                        <textarea
+                          className="min-h-28 rounded-md border border-ink/15 bg-white px-4 py-3 text-sm leading-6 text-ink outline-none transition focus:border-ocean focus:ring-4 focus:ring-ocean/15"
+                          onChange={(event) => setSummaryDraft(event.target.value)}
+                          placeholder="Generate notes or write a concise meeting summary."
+                          value={summaryDraft}
+                        />
+                      </label>
+
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <label className="grid gap-2">
+                          <span className="text-sm font-semibold text-graphite">Action items</span>
+                          <textarea
+                            className="min-h-32 rounded-md border border-ink/15 bg-white px-4 py-3 text-sm leading-6 text-ink outline-none transition focus:border-ocean focus:ring-4 focus:ring-ocean/15"
+                            onChange={(event) => setActionItemsDraft(event.target.value)}
+                            placeholder="One action item per line."
+                            value={actionItemsDraft}
+                          />
+                        </label>
+                        <label className="grid gap-2">
+                          <span className="text-sm font-semibold text-graphite">Decisions</span>
+                          <textarea
+                            className="min-h-32 rounded-md border border-ink/15 bg-white px-4 py-3 text-sm leading-6 text-ink outline-none transition focus:border-ocean focus:ring-4 focus:ring-ocean/15"
+                            onChange={(event) => setDecisionsDraft(event.target.value)}
+                            placeholder="One decision per line."
+                            value={decisionsDraft}
+                          />
+                        </label>
+                        <label className="grid gap-2">
+                          <span className="text-sm font-semibold text-graphite">Topics</span>
+                          <textarea
+                            className="min-h-32 rounded-md border border-ink/15 bg-white px-4 py-3 text-sm leading-6 text-ink outline-none transition focus:border-ocean focus:ring-4 focus:ring-ocean/15"
+                            onChange={(event) => setTopicsDraft(event.target.value)}
+                            placeholder="One topic per line."
+                            value={topicsDraft}
+                          />
+                        </label>
                       </div>
                     </div>
                   </div>
@@ -1370,6 +1685,7 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
                           <span>
                             {meeting.transcriptContent ? "Transcript saved" : "No transcript"}
                           </span>
+                          <span>{meeting.summary ? "Notes saved" : "No notes"}</span>
                         </span>
                       </button>
 
@@ -1408,6 +1724,20 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
                           <FileText className="h-4 w-4" />
                           {transcribingMeetingId === meeting.id ? "Transcribing" : "Transcribe"}
                         </button>
+                        <button
+                          className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-ink/15 bg-white px-3 text-sm font-semibold text-graphite transition hover:border-ocean/50 hover:text-ocean disabled:opacity-55"
+                          disabled={generatingNotesMeetingId === meeting.id || !meeting.transcriptContent}
+                          onClick={() => {
+                            setSelectedSavedMeetingId(meeting.id);
+                            setSelectedDraftId(null);
+                            setElapsedSeconds(meeting.duration_seconds);
+                            generateNotes(meeting);
+                          }}
+                          type="button"
+                        >
+                          <Save className="h-4 w-4" />
+                          {generatingNotesMeetingId === meeting.id ? "Generating" : "Notes"}
+                        </button>
                       </div>
                     </div>
 
@@ -1424,6 +1754,11 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
                         {meeting.transcriptContent && (
                           <p className="line-clamp-3 text-sm leading-6 text-graphite">
                             {meeting.transcriptContent}
+                          </p>
+                        )}
+                        {meeting.summary && (
+                          <p className="rounded-md bg-white/70 px-3 py-2 text-sm leading-6 text-graphite">
+                            {meeting.summary}
                           </p>
                         )}
                       </div>

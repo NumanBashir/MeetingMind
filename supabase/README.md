@@ -15,12 +15,15 @@ Transcription also requires a server-only OpenAI key in `.env.local`:
 
 * `OPENAI_API_KEY`
 * `OPENAI_TRANSCRIPTION_MODEL`
+* `OPENAI_NOTES_MODEL`
 
 Use `gpt-4o-mini-transcribe` for cost-conscious MVP testing. Supported values in the app are:
 
 * `gpt-4o-mini-transcribe`
 * `gpt-4o-transcribe`
 * `whisper-1`
+
+Use `gpt-4o-mini` for cost-conscious AI note generation.
 
 ## Schema
 
