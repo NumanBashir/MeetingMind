@@ -7,7 +7,8 @@ This plan turns `masterplan.md` into an implementation sequence. Each step shoul
 * Step 1: Product masterplan - Done
 * Step 2: Next.js app scaffold - Done
 * Step 3: Browser microphone recording - Done
-* Step 4: Local meeting draft storage - Next
+* Step 4: Local meeting draft storage - Done
+* Step 5: Backend choice and setup - Next
 
 ---
 
@@ -89,7 +90,7 @@ Acceptance checks:
 
 ## Step 4: Local Meeting Draft Storage
 
-Status: Next
+Status: Done
 
 Goal:
 Keep completed recordings in a local in-browser meeting list before adding backend storage.
@@ -101,6 +102,14 @@ Scope:
 * Show a simple meeting history list on the page
 * Allow selecting a previous local draft
 * Allow deleting a local draft
+
+Implemented:
+
+* Completed recordings are added to a local meeting draft list
+* Drafts store title, date, language, duration, audio URL, MIME type, file name, and file size
+* Draft list shows title, date, duration, language, and size
+* Selecting a draft shows playback and meeting details
+* Deleting a draft revokes the local audio URL
 
 Out of scope:
 
@@ -121,7 +130,7 @@ Acceptance checks:
 
 ## Step 5: Backend Choice And Setup
 
-Status: Planned
+Status: Next
 
 Goal:
 Add persistent user-owned storage.
