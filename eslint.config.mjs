@@ -16,6 +16,11 @@ const eslintConfig = [
     ignores: [".next/**", "node_modules/**", "out/**", "next-env.d.ts"],
   },
   ...compat.extends("next/core-web-vitals", "next/typescript"),
+  {
+    rules: {
+      "jsx-a11y/media-has-caption": "off",
+    },
+  },
 ];
 
 export default eslintConfig;

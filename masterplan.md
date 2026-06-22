@@ -275,6 +275,8 @@ AI suggestions are drafts, not final truth.
 
 ## Development Phases
 
+For the implementation sequence, see `step-plan.md`.
+
 ### Phase 1
 
 Recording

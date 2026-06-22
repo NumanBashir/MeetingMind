@@ -1,0 +1,317 @@
+# MeetingMind Step Plan
+
+This plan turns `masterplan.md` into an implementation sequence. Each step should be completed, verified, and reviewed before moving to the next one.
+
+## Current Status
+
+* Step 1: Product masterplan - Done
+* Step 2: Next.js app scaffold - Done
+* Step 3: Browser microphone recording - Done
+* Step 4: Local meeting draft storage - Next
+
+---
+
+## Step 1: Product Masterplan
+
+Status: Done
+
+Goal:
+Capture the product vision, MVP scope, target users, data model, security notes, and phased roadmap.
+
+Implemented:
+
+* Added `masterplan.md`
+* Defined MVP as Record -> Transcribe -> Review -> Save
+* Defined core entities: User, Meeting, Transcript, Summary, ActionItem, Decision
+
+Acceptance check:
+
+* Product direction is documented in the repo.
+
+---
+
+## Step 2: App Scaffold
+
+Status: Done
+
+Goal:
+Create the actual web app foundation.
+
+Implemented:
+
+* Next.js app router project
+* React and TypeScript
+* Tailwind CSS
+* ESLint
+* Responsive first screen
+* Meeting title field
+* Language selector
+* Recording status UI
+* Timer-only start and stop state
+
+Acceptance checks:
+
+* `npm run lint` passes
+* `npm run build` passes
+* App runs at `http://localhost:3000`
+
+---
+
+## Step 3: Browser Microphone Recording
+
+Status: Done
+
+Goal:
+Turn the recorder UI into real browser audio recording.
+
+Implemented:
+
+* Microphone permission request
+* Browser `MediaRecorder` integration
+* Start recording
+* Stop recording
+* Duration tracking
+* Local audio preview
+* Audio download
+* Permission and unsupported-browser error handling
+* Microphone tracks stop after recording
+
+Acceptance checks:
+
+* User can start recording after browser permission
+* User can stop recording
+* User can play back the captured audio
+* User can download the captured audio
+* `npm run lint` passes
+* `npm run build` passes
+
+---
+
+## Step 4: Local Meeting Draft Storage
+
+Status: Next
+
+Goal:
+Keep completed recordings in a local in-browser meeting list before adding backend storage.
+
+Scope:
+
+* Create a meeting draft after recording stops
+* Store title, date, language, duration, audio URL, and audio metadata in React state
+* Show a simple meeting history list on the page
+* Allow selecting a previous local draft
+* Allow deleting a local draft
+
+Out of scope:
+
+* Permanent backend storage
+* User accounts
+* Transcription
+
+Acceptance checks:
+
+* Stopping a recording creates a visible meeting draft
+* Meeting drafts show title, date, duration, and language
+* User can replay a draft recording
+* User can delete a draft
+* `npm run lint` passes
+* `npm run build` passes
+
+---
+
+## Step 5: Backend Choice And Setup
+
+Status: Planned
+
+Goal:
+Add persistent user-owned storage.
+
+Recommended stack:
+
+* Supabase Auth for Google Sign-In
+* Supabase Postgres for meeting metadata
+* Supabase Storage for audio files
+
+Scope:
+
+* Add environment variable template
+* Add Supabase client
+* Add database schema notes or migrations
+* Add auth placeholder flow
+
+Acceptance checks:
+
+* App can connect to Supabase with env vars
+* Schema supports users, meetings, transcripts, summaries, action items, decisions, and topics
+* Local development fails clearly when env vars are missing
+
+---
+
+## Step 6: Authentication
+
+Status: Planned
+
+Goal:
+Let a user sign in with Google and isolate their meeting data.
+
+Scope:
+
+* Google Sign-In
+* Signed-in and signed-out states
+* User profile display
+* Require authentication before saving meetings permanently
+
+Acceptance checks:
+
+* User can sign in with Google
+* User can sign out
+* Saved meeting records are associated with the signed-in user
+
+---
+
+## Step 7: Persistent Recording Storage
+
+Status: Planned
+
+Goal:
+Upload recorded audio and save meeting metadata.
+
+Scope:
+
+* Upload recorded audio to storage
+* Save meeting metadata to database
+* Show saved meeting list
+* Delete meeting and associated audio
+
+Acceptance checks:
+
+* Recording can be saved after stop
+* Refreshing the page keeps saved meetings
+* Deleting a meeting removes metadata and audio
+
+---
+
+## Step 8: Transcription
+
+Status: Planned
+
+Goal:
+Convert saved audio into text.
+
+Scope:
+
+* Send audio to speech-to-text service
+* Store transcript text
+* Show transcript on the meeting detail screen
+* Allow editing transcript text
+
+Initial language support:
+
+* English
+* Danish
+* Urdu
+
+Acceptance checks:
+
+* User can transcribe a saved recording
+* Transcript is stored with the meeting
+* User can edit and save transcript changes
+
+---
+
+## Step 9: Speaker Separation
+
+Status: Planned
+
+Goal:
+Improve transcript readability with generic speaker labels.
+
+Scope:
+
+* Speaker 1, Speaker 2, Speaker 3 labels
+* No real speaker identity required
+* Editable transcript remains supported
+
+Acceptance checks:
+
+* Transcript can display speaker-labeled segments
+* User can edit speaker-labeled transcript text
+
+---
+
+## Step 10: AI Meeting Notes
+
+Status: Planned
+
+Goal:
+Generate useful meeting outputs from the transcript.
+
+Scope:
+
+* Summary
+* Action items
+* Decisions
+* Topics discussed
+* Editable generated notes
+
+Acceptance checks:
+
+* User can generate notes from a transcript
+* User can edit summary, action items, decisions, and topics
+* Generated output is saved with the meeting
+
+---
+
+## Step 11: Export
+
+Status: Planned
+
+Goal:
+Let users take meeting information out of the app.
+
+Scope:
+
+* Copy transcript
+* Download transcript
+* Export meeting notes
+
+Acceptance checks:
+
+* User can copy transcript
+* User can download transcript
+* User can export notes in a readable format
+
+---
+
+## Step 12: Mobile And Product Polish
+
+Status: Planned
+
+Goal:
+Make the MVP pleasant and reliable on phones and desktop.
+
+Scope:
+
+* Mobile layout pass
+* Loading and empty states
+* Error states
+* Recording guidance
+* Performance checks for longer meetings
+
+Acceptance checks:
+
+* Core flow works on desktop and mobile browser
+* UI remains readable at small screen widths
+* Long recordings fail gracefully or show clear constraints
+
+---
+
+## Future Steps
+
+These are intentionally after the MVP.
+
+* Audio upload
+* Video upload
+* Meeting search
+* AI meeting memory Q&A
+* Zoom, Teams, Google Meet, and Calendar integrations
