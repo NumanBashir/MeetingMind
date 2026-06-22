@@ -50,6 +50,8 @@ type MeetingRow = Database["public"]["Tables"]["meetings"]["Row"];
 
 type SavedMeeting = MeetingRow & {
   signedAudioUrl: string | null;
+  transcriptContent: string;
+  transcriptUpdatedAt: string | null;
 };
 
 type MeetingRecorderProps = {
@@ -144,6 +146,10 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
   const [savingDraftId, setSavingDraftId] = useState<string | null>(null);
   const [deletingSavedMeetingId, setDeletingSavedMeetingId] = useState<string | null>(null);
   const [savedMeetingsRefreshKey, setSavedMeetingsRefreshKey] = useState(0);
+  const [transcribingMeetingId, setTranscribingMeetingId] = useState<string | null>(null);
+  const [savingTranscriptMeetingId, setSavingTranscriptMeetingId] = useState<string | null>(null);
+  const [savingTitleMeetingId, setSavingTitleMeetingId] = useState<string | null>(null);
+  const [transcriptDraft, setTranscriptDraft] = useState("");
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -308,10 +314,45 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
       }
 
       const meetings = (data ?? []) as MeetingRow[];
+      const meetingIds = meetings.map((meeting) => meeting.id);
+      const { data: transcriptRows, error: transcriptsError } =
+        meetingIds.length > 0
+          ? await supabaseClient
+              .from("transcripts")
+              .select("meeting_id, content, updated_at")
+              .in("meeting_id", meetingIds)
+          : { data: [], error: null };
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (transcriptsError) {
+        setSavedMeetingError(transcriptsError.message);
+        setIsSavedMeetingsLoading(false);
+        return;
+      }
+
+      const transcriptByMeetingId = new Map(
+        (transcriptRows ?? []).map((row) => [
+          row.meeting_id,
+          {
+            content: row.content,
+            updatedAt: row.updated_at,
+          },
+        ]),
+      );
       const meetingsWithAudio = await Promise.all(
         meetings.map(async (meeting): Promise<SavedMeeting> => {
+          const transcript = transcriptByMeetingId.get(meeting.id);
+
           if (!meeting.audio_path) {
-            return { ...meeting, signedAudioUrl: null };
+            return {
+              ...meeting,
+              signedAudioUrl: null,
+              transcriptContent: transcript?.content ?? "",
+              transcriptUpdatedAt: transcript?.updatedAt ?? null,
+            };
           }
 
           const { data: signedUrlData } = await supabaseClient.storage
@@ -321,6 +362,8 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
           return {
             ...meeting,
             signedAudioUrl: signedUrlData?.signedUrl ?? null,
+            transcriptContent: transcript?.content ?? "",
+            transcriptUpdatedAt: transcript?.updatedAt ?? null,
           };
         }),
       );
@@ -342,6 +385,10 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
       isMounted = false;
     };
   }, [savedMeetingsRefreshKey, supabase, user]);
+
+  useEffect(() => {
+    setTranscriptDraft(selectedSavedMeeting?.transcriptContent ?? "");
+  }, [selectedSavedMeeting?.id, selectedSavedMeeting?.transcriptContent]);
 
   async function startRecording() {
     setRecordingError(null);
@@ -467,6 +514,7 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
       return;
     }
 
+    const title = draft.title.trim() || "Untitled meeting";
     const audioPath = `${user.id}/${draft.id}/${draft.fileName}`;
     setSavingDraftId(draft.id);
     setSavedMeetingError(null);
@@ -487,7 +535,7 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
     const { error: insertError } = await supabase.from("meetings").insert({
       id: draft.id,
       user_id: user.id,
-      title: draft.title,
+      title,
       created_at: draft.createdAt,
       duration_seconds: draft.durationSeconds,
       language: draft.language,
@@ -543,6 +591,158 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
     setSavedMeetings((current) => current.filter((item) => item.id !== meeting.id));
     setSelectedSavedMeetingId((current) => (current === meeting.id ? null : current));
     setDeletingSavedMeetingId(null);
+  }
+
+  async function transcribeSavedMeeting(meeting: SavedMeeting) {
+    if (!supabase) {
+      setSavedMeetingError("Supabase is not configured.");
+      return;
+    }
+
+    setTranscribingMeetingId(meeting.id);
+    setSavedMeetingError(null);
+
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+
+    if (sessionError || !session) {
+      setSavedMeetingError(sessionError?.message ?? "Sign in before transcribing meetings.");
+      setTranscribingMeetingId(null);
+      return;
+    }
+
+    const response = await fetch("/api/transcribe", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ meetingId: meeting.id }),
+    });
+    const data = (await response.json()) as { transcript?: string; error?: string };
+
+    if (!response.ok || typeof data.transcript !== "string") {
+      setSavedMeetingError(data.error ?? "Could not transcribe this meeting.");
+      setTranscribingMeetingId(null);
+      return;
+    }
+
+    const updatedAt = new Date().toISOString();
+    setSavedMeetings((current) =>
+      current.map((item) =>
+        item.id === meeting.id
+          ? {
+              ...item,
+              transcriptContent: data.transcript ?? "",
+              transcriptUpdatedAt: updatedAt,
+            }
+          : item,
+      ),
+    );
+    setTranscriptDraft(data.transcript);
+    setTranscribingMeetingId(null);
+  }
+
+  async function saveTranscript(meeting: SavedMeeting) {
+    if (!supabase) {
+      setSavedMeetingError("Supabase is not configured.");
+      return;
+    }
+
+    setSavingTranscriptMeetingId(meeting.id);
+    setSavedMeetingError(null);
+
+    const updatedAt = new Date().toISOString();
+    const { error } = await supabase.from("transcripts").upsert({
+      meeting_id: meeting.id,
+      content: transcriptDraft,
+      updated_at: updatedAt,
+    });
+
+    if (error) {
+      setSavedMeetingError(error.message);
+      setSavingTranscriptMeetingId(null);
+      return;
+    }
+
+    setSavedMeetings((current) =>
+      current.map((item) =>
+        item.id === meeting.id
+          ? {
+              ...item,
+              transcriptContent: transcriptDraft,
+              transcriptUpdatedAt: updatedAt,
+            }
+          : item,
+      ),
+    );
+    setSavingTranscriptMeetingId(null);
+  }
+
+  function updateCurrentTitle(title: string) {
+    if (selectedDraft) {
+      setMeetingDrafts((current) =>
+        current.map((draft) =>
+          draft.id === selectedDraft.id
+            ? {
+                ...draft,
+                title,
+                fileName: getRecordingFileName(title, draft.audioMimeType),
+              }
+            : draft,
+        ),
+      );
+      return;
+    }
+
+    if (selectedSavedMeeting) {
+      setSavedMeetings((current) =>
+        current.map((meeting) =>
+          meeting.id === selectedSavedMeeting.id
+            ? {
+                ...meeting,
+                title,
+              }
+            : meeting,
+        ),
+      );
+      return;
+    }
+
+    setMeetingTitle(title);
+  }
+
+  async function saveSavedMeetingTitle(meeting: SavedMeeting) {
+    if (!supabase) {
+      setSavedMeetingError("Supabase is not configured.");
+      return;
+    }
+
+    const title = meeting.title.trim() || "Untitled meeting";
+    setSavingTitleMeetingId(meeting.id);
+    setSavedMeetingError(null);
+
+    const { error } = await supabase.from("meetings").update({ title }).eq("id", meeting.id);
+
+    if (error) {
+      setSavedMeetingError(error.message);
+      setSavingTitleMeetingId(null);
+      return;
+    }
+
+    setSavedMeetings((current) =>
+      current.map((item) =>
+        item.id === meeting.id
+          ? {
+              ...item,
+              title,
+            }
+          : item,
+      ),
+    );
+    setSavingTitleMeetingId(null);
   }
 
   const displayedTitle = selectedDraft?.title ?? selectedSavedMeeting?.title ?? meetingTitle;
@@ -624,10 +824,27 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
                 <span className="text-sm font-semibold text-graphite">Meeting title</span>
                 <input
                   className="min-h-12 rounded-md border border-ink/15 bg-white px-4 text-lg font-semibold text-ink outline-none transition focus:border-ocean focus:ring-4 focus:ring-ocean/15"
-                  value={meetingTitle}
-                  onChange={(event) => setMeetingTitle(event.target.value)}
+                  value={displayedTitle}
+                  onChange={(event) => updateCurrentTitle(event.target.value)}
                 />
               </label>
+
+              {selectedSavedMeeting && (
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    className="inline-flex h-11 w-fit items-center justify-center gap-2 rounded-md border border-ink/15 bg-white px-4 text-sm font-semibold text-graphite transition hover:border-ocean/50 hover:text-ocean disabled:opacity-55"
+                    disabled={savingTitleMeetingId === selectedSavedMeeting.id}
+                    onClick={() => saveSavedMeetingTitle(selectedSavedMeeting)}
+                    type="button"
+                  >
+                    <Save className="h-4 w-4" />
+                    {savingTitleMeetingId === selectedSavedMeeting.id ? "Saving title" : "Save title"}
+                  </button>
+                  <span className="text-sm font-medium text-graphite">
+                    Title edits on saved meetings are permanent after saving.
+                  </span>
+                </div>
+              )}
 
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-lg border border-ink/10 bg-cloud p-4">
@@ -795,6 +1012,48 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
                       <Trash2 className="h-4 w-4" />
                       {deletingSavedMeetingId === selectedSavedMeeting.id ? "Deleting" : "Delete saved meeting"}
                     </button>
+                    <button
+                      className="inline-flex h-11 w-fit items-center justify-center gap-2 rounded-md bg-ocean px-4 text-sm font-semibold text-white transition hover:bg-[#245b76] disabled:opacity-55"
+                      disabled={transcribingMeetingId === selectedSavedMeeting.id}
+                      onClick={() => transcribeSavedMeeting(selectedSavedMeeting)}
+                      type="button"
+                    >
+                      <FileText className="h-4 w-4" />
+                      {transcribingMeetingId === selectedSavedMeeting.id
+                        ? "Transcribing"
+                        : selectedSavedMeeting.transcriptContent
+                          ? "Retranscribe"
+                          : "Transcribe"}
+                    </button>
+                    <div className="grid gap-3 border-t border-ink/10 pt-4">
+                      <label className="grid gap-2">
+                        <span className="text-sm font-semibold text-graphite">Transcript</span>
+                        <textarea
+                          className="min-h-44 rounded-md border border-ink/15 bg-white px-4 py-3 text-sm leading-6 text-ink outline-none transition focus:border-ocean focus:ring-4 focus:ring-ocean/15"
+                          onChange={(event) => setTranscriptDraft(event.target.value)}
+                          placeholder="Transcribe the saved audio, then edit the transcript here."
+                          value={transcriptDraft}
+                        />
+                      </label>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <button
+                          className="inline-flex h-11 w-fit items-center justify-center gap-2 rounded-md border border-ink/15 bg-white px-4 text-sm font-semibold text-graphite transition hover:border-ocean/50 hover:text-ocean disabled:opacity-55"
+                          disabled={savingTranscriptMeetingId === selectedSavedMeeting.id}
+                          onClick={() => saveTranscript(selectedSavedMeeting)}
+                          type="button"
+                        >
+                          <Save className="h-4 w-4" />
+                          {savingTranscriptMeetingId === selectedSavedMeeting.id
+                            ? "Saving transcript"
+                            : "Save transcript"}
+                        </button>
+                        {selectedSavedMeeting.transcriptUpdatedAt && (
+                          <span className="text-sm font-medium text-graphite">
+                            Updated {formatDraftDate(selectedSavedMeeting.transcriptUpdatedAt)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1108,6 +1367,9 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
                           {meeting.audio_size_bytes && (
                             <span>{formatBytes(meeting.audio_size_bytes)}</span>
                           )}
+                          <span>
+                            {meeting.transcriptContent ? "Transcript saved" : "No transcript"}
+                          </span>
                         </span>
                       </button>
 
@@ -1132,16 +1394,39 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
+                        <button
+                          className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-ocean px-3 text-sm font-semibold text-white transition hover:bg-[#245b76] disabled:opacity-55"
+                          disabled={transcribingMeetingId === meeting.id}
+                          onClick={() => {
+                            setSelectedSavedMeetingId(meeting.id);
+                            setSelectedDraftId(null);
+                            setElapsedSeconds(meeting.duration_seconds);
+                            transcribeSavedMeeting(meeting);
+                          }}
+                          type="button"
+                        >
+                          <FileText className="h-4 w-4" />
+                          {transcribingMeetingId === meeting.id ? "Transcribing" : "Transcribe"}
+                        </button>
                       </div>
                     </div>
 
-                    {isSelected && meeting.signedAudioUrl && (
-                      <audio
-                        aria-label={`Saved audio for ${meeting.title}`}
-                        className="w-full"
-                        controls
-                        src={meeting.signedAudioUrl}
-                      />
+                    {isSelected && (
+                      <div className="grid gap-3">
+                        {meeting.signedAudioUrl && (
+                          <audio
+                            aria-label={`Saved audio for ${meeting.title}`}
+                            className="w-full"
+                            controls
+                            src={meeting.signedAudioUrl}
+                          />
+                        )}
+                        {meeting.transcriptContent && (
+                          <p className="line-clamp-3 text-sm leading-6 text-graphite">
+                            {meeting.transcriptContent}
+                          </p>
+                        )}
+                      </div>
                     )}
                   </article>
                 );

@@ -11,6 +11,17 @@ Copy `.env.example` to `.env.local` and fill in:
 
 Do not put a service role key in the browser app.
 
+Transcription also requires a server-only OpenAI key in `.env.local`:
+
+* `OPENAI_API_KEY`
+* `OPENAI_TRANSCRIPTION_MODEL`
+
+Use `gpt-4o-mini-transcribe` for cost-conscious MVP testing. Supported values in the app are:
+
+* `gpt-4o-mini-transcribe`
+* `gpt-4o-transcribe`
+* `whisper-1`
+
 ## Schema
 
 Run `supabase/schema.sql` in the Supabase SQL editor or through the Supabase CLI after creating a project.

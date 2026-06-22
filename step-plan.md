@@ -11,7 +11,8 @@ This plan turns `masterplan.md` into an implementation sequence. Each step shoul
 * Step 5: Backend choice and setup - Done
 * Step 6: Authentication - Done
 * Step 7: Persistent recording storage - Done
-* Step 8: Transcription - Next
+* Step 8: Transcription - Done
+* Step 9: Speaker separation - Next
 
 ---
 
@@ -236,7 +237,7 @@ Acceptance checks:
 
 ## Step 8: Transcription
 
-Status: Next
+Status: Done
 
 Goal:
 Convert saved audio into text.
@@ -247,6 +248,20 @@ Scope:
 * Store transcript text
 * Show transcript on the meeting detail screen
 * Allow editing transcript text
+
+Implemented:
+
+* Added `openai` Node SDK
+* Added server-only `OPENAI_API_KEY` env placeholder
+* Added guarded `OPENAI_TRANSCRIPTION_MODEL` config
+* Added `/api/transcribe`
+* Downloads authenticated meeting audio from Supabase Storage
+* Transcribes saved audio with a cost-conscious default model
+* Stores transcript text in Supabase `transcripts`
+* Loads saved transcripts with saved meetings
+* Allows editing and saving transcript text
+* Shows OpenAI quota and billing errors clearly in the app
+* Allows editing local draft titles and saved meeting titles
 
 Initial language support:
 
@@ -264,7 +279,7 @@ Acceptance checks:
 
 ## Step 9: Speaker Separation
 
-Status: Planned
+Status: Next
 
 Goal:
 Improve transcript readability with generic speaker labels.
