@@ -10,7 +10,8 @@ This plan turns `masterplan.md` into an implementation sequence. Each step shoul
 * Step 4: Local meeting draft storage - Done
 * Step 5: Backend choice and setup - Done
 * Step 6: Authentication - Done
-* Step 7: Persistent recording storage - Next
+* Step 7: Persistent recording storage - Done
+* Step 8: Transcription - Next
 
 ---
 
@@ -203,7 +204,7 @@ Acceptance checks:
 
 ## Step 7: Persistent Recording Storage
 
-Status: Next
+Status: Done
 
 Goal:
 Upload recorded audio and save meeting metadata.
@@ -215,6 +216,16 @@ Scope:
 * Show saved meeting list
 * Delete meeting and associated audio
 
+Implemented:
+
+* Added permanent save action for local drafts
+* Uploads audio to private Supabase Storage under the signed-in user path
+* Inserts meeting metadata into the `meetings` table
+* Loads saved meetings after sign-in
+* Creates signed URLs for saved audio playback
+* Deletes saved meeting metadata and associated audio
+* Keeps local drafts separate from persisted meetings
+
 Acceptance checks:
 
 * Recording can be saved after stop
@@ -225,7 +236,7 @@ Acceptance checks:
 
 ## Step 8: Transcription
 
-Status: Planned
+Status: Next
 
 Goal:
 Convert saved audio into text.

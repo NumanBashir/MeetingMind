@@ -37,6 +37,7 @@ export type Database = {
           audio_mime_type?: string | null;
           audio_size_bytes?: number | null;
         };
+        Relationships: [];
       };
       transcripts: {
         Row: {
@@ -57,6 +58,7 @@ export type Database = {
           speaker_segments?: Json | null;
           updated_at?: string;
         };
+        Relationships: [];
       };
       meeting_notes: {
         Row: {
@@ -80,6 +82,7 @@ export type Database = {
           topics?: string[];
           updated_at?: string;
         };
+        Relationships: [];
       };
       action_items: {
         Row: {
@@ -106,6 +109,7 @@ export type Database = {
           assignee?: string | null;
           created_at?: string;
         };
+        Relationships: [];
       };
     };
     Views: Record<string, never>;

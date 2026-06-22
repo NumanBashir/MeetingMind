@@ -11,6 +11,8 @@ import {
   Languages,
   LogOut,
   Mic,
+  RefreshCw,
+  Save,
   ShieldCheck,
   Square,
   TimerReset,
@@ -21,6 +23,7 @@ import type { User } from "@supabase/supabase-js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PublicEnvStatus } from "@/lib/env";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
+import type { Database } from "@/lib/supabase/types";
 
 const languages = ["English", "Danish", "Urdu"];
 const preferredMimeTypes = [
@@ -36,10 +39,17 @@ type MeetingDraft = {
   createdAt: string;
   durationSeconds: number;
   language: string;
+  audioBlob: Blob;
   audioUrl: string;
   audioMimeType: string;
   fileName: string;
   sizeBytes: number;
+};
+
+type MeetingRow = Database["public"]["Tables"]["meetings"]["Row"];
+
+type SavedMeeting = MeetingRow & {
+  signedAudioUrl: string | null;
 };
 
 type MeetingRecorderProps = {
@@ -127,6 +137,13 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(backendStatus.isConfigured);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [savedMeetings, setSavedMeetings] = useState<SavedMeeting[]>([]);
+  const [selectedSavedMeetingId, setSelectedSavedMeetingId] = useState<string | null>(null);
+  const [isSavedMeetingsLoading, setIsSavedMeetingsLoading] = useState(false);
+  const [savedMeetingError, setSavedMeetingError] = useState<string | null>(null);
+  const [savingDraftId, setSavingDraftId] = useState<string | null>(null);
+  const [deletingSavedMeetingId, setDeletingSavedMeetingId] = useState<string | null>(null);
+  const [savedMeetingsRefreshKey, setSavedMeetingsRefreshKey] = useState(0);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -231,6 +248,10 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
     () => meetingDrafts.find((draft) => draft.id === selectedDraftId) ?? null,
     [meetingDrafts, selectedDraftId],
   );
+  const selectedSavedMeeting = useMemo(
+    () => savedMeetings.find((meeting) => meeting.id === selectedSavedMeetingId) ?? null,
+    [savedMeetings, selectedSavedMeetingId],
+  );
 
   const recordingStatus = useMemo(() => {
     if (isPreparing) {
@@ -245,12 +266,82 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
       return "Draft selected";
     }
 
+    if (selectedSavedMeeting) {
+      return "Saved meeting selected";
+    }
+
     if (elapsedSeconds > 0) {
       return "Recording stopped";
     }
 
     return "Ready to record";
-  }, [elapsedSeconds, isPreparing, isRecording, selectedDraft]);
+  }, [elapsedSeconds, isPreparing, isRecording, selectedDraft, selectedSavedMeeting]);
+
+  useEffect(() => {
+    if (!supabase || !user) {
+      setSavedMeetings([]);
+      setSelectedSavedMeetingId(null);
+      setIsSavedMeetingsLoading(false);
+      return;
+    }
+
+    const supabaseClient = supabase;
+    let isMounted = true;
+
+    async function loadSavedMeetings() {
+      setIsSavedMeetingsLoading(true);
+      setSavedMeetingError(null);
+
+      const { data, error } = await supabaseClient
+        .from("meetings")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (error) {
+        setSavedMeetingError(error.message);
+        setIsSavedMeetingsLoading(false);
+        return;
+      }
+
+      const meetings = (data ?? []) as MeetingRow[];
+      const meetingsWithAudio = await Promise.all(
+        meetings.map(async (meeting): Promise<SavedMeeting> => {
+          if (!meeting.audio_path) {
+            return { ...meeting, signedAudioUrl: null };
+          }
+
+          const { data: signedUrlData } = await supabaseClient.storage
+            .from("meeting-audio")
+            .createSignedUrl(meeting.audio_path, 60 * 60);
+
+          return {
+            ...meeting,
+            signedAudioUrl: signedUrlData?.signedUrl ?? null,
+          };
+        }),
+      );
+
+      if (!isMounted) {
+        return;
+      }
+
+      setSavedMeetings(meetingsWithAudio);
+      setSelectedSavedMeetingId((current) =>
+        current && meetingsWithAudio.some((meeting) => meeting.id === current) ? current : null,
+      );
+      setIsSavedMeetingsLoading(false);
+    }
+
+    void loadSavedMeetings();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [savedMeetingsRefreshKey, supabase, user]);
 
   async function startRecording() {
     setRecordingError(null);
@@ -264,6 +355,7 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
 
     try {
       setSelectedDraftId(null);
+      setSelectedSavedMeetingId(null);
       setElapsedSeconds(0);
       chunksRef.current = [];
 
@@ -300,6 +392,7 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
           createdAt,
           durationSeconds: elapsedSecondsRef.current,
           language: languageRef.current,
+          audioBlob,
           audioUrl,
           audioMimeType: recorderMimeType,
           fileName: getRecordingFileName(title, recorderMimeType),
@@ -347,6 +440,7 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
 
   function resetRecording() {
     setSelectedDraftId(null);
+    setSelectedSavedMeetingId(null);
     setElapsedSeconds(0);
     setRecordingError(null);
     chunksRef.current = [];
@@ -367,9 +461,94 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
     setSelectedDraftId((current) => (current === draftId ? null : current));
   }
 
-  const displayedTitle = selectedDraft?.title ?? meetingTitle;
-  const displayedLanguage = selectedDraft?.language ?? language;
-  const displayedDuration = selectedDraft?.durationSeconds ?? elapsedSeconds;
+  async function saveDraft(draft: MeetingDraft) {
+    if (!supabase || !user) {
+      setSavedMeetingError("Sign in before saving recordings.");
+      return;
+    }
+
+    const audioPath = `${user.id}/${draft.id}/${draft.fileName}`;
+    setSavingDraftId(draft.id);
+    setSavedMeetingError(null);
+
+    const { error: uploadError } = await supabase.storage
+      .from("meeting-audio")
+      .upload(audioPath, draft.audioBlob, {
+        contentType: draft.audioMimeType,
+        upsert: false,
+      });
+
+    if (uploadError) {
+      setSavedMeetingError(uploadError.message);
+      setSavingDraftId(null);
+      return;
+    }
+
+    const { error: insertError } = await supabase.from("meetings").insert({
+      id: draft.id,
+      user_id: user.id,
+      title: draft.title,
+      created_at: draft.createdAt,
+      duration_seconds: draft.durationSeconds,
+      language: draft.language,
+      audio_path: audioPath,
+      audio_mime_type: draft.audioMimeType,
+      audio_size_bytes: draft.sizeBytes,
+    });
+
+    if (insertError) {
+      await supabase.storage.from("meeting-audio").remove([audioPath]);
+      setSavedMeetingError(insertError.message);
+      setSavingDraftId(null);
+      return;
+    }
+
+    URL.revokeObjectURL(draft.audioUrl);
+    draftAudioUrlsRef.current.delete(draft.audioUrl);
+    setMeetingDrafts((current) => current.filter((item) => item.id !== draft.id));
+    setSelectedDraftId(null);
+    setSelectedSavedMeetingId(draft.id);
+    setSavingDraftId(null);
+    setSavedMeetingsRefreshKey((current) => current + 1);
+  }
+
+  async function deleteSavedMeeting(meeting: SavedMeeting) {
+    if (!supabase) {
+      return;
+    }
+
+    setDeletingSavedMeetingId(meeting.id);
+    setSavedMeetingError(null);
+
+    if (meeting.audio_path) {
+      const { error: storageError } = await supabase.storage
+        .from("meeting-audio")
+        .remove([meeting.audio_path]);
+
+      if (storageError) {
+        setSavedMeetingError(storageError.message);
+        setDeletingSavedMeetingId(null);
+        return;
+      }
+    }
+
+    const { error: deleteError } = await supabase.from("meetings").delete().eq("id", meeting.id);
+
+    if (deleteError) {
+      setSavedMeetingError(deleteError.message);
+      setDeletingSavedMeetingId(null);
+      return;
+    }
+
+    setSavedMeetings((current) => current.filter((item) => item.id !== meeting.id));
+    setSelectedSavedMeetingId((current) => (current === meeting.id ? null : current));
+    setDeletingSavedMeetingId(null);
+  }
+
+  const displayedTitle = selectedDraft?.title ?? selectedSavedMeeting?.title ?? meetingTitle;
+  const displayedLanguage = selectedDraft?.language ?? selectedSavedMeeting?.language ?? language;
+  const displayedDuration =
+    selectedDraft?.durationSeconds ?? selectedSavedMeeting?.duration_seconds ?? elapsedSeconds;
   const displayName =
     typeof user?.user_metadata.name === "string"
       ? user.user_metadata.name
@@ -498,7 +677,11 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
               <div className="flex gap-3">
                 <button
                   className="inline-flex h-12 min-w-12 items-center justify-center rounded-md border border-ink/15 bg-white px-4 text-sm font-semibold text-graphite transition hover:border-ocean/50 hover:text-ocean disabled:opacity-45"
-                  disabled={isRecording || isPreparing || (elapsedSeconds === 0 && !selectedDraft)}
+                  disabled={
+                    isRecording ||
+                    isPreparing ||
+                    (elapsedSeconds === 0 && !selectedDraft && !selectedSavedMeeting)
+                  }
                   onClick={resetRecording}
                   title="Clear selection"
                   type="button"
@@ -529,10 +712,13 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
               </div>
             </div>
 
-            {(recordingError || selectedDraft) && (
+            {(recordingError || savedMeetingError || selectedDraft || selectedSavedMeeting) && (
               <div className="mt-5 rounded-lg border border-ink/10 bg-cloud p-4">
                 {recordingError && (
                   <p className="text-sm font-semibold text-coral">{recordingError}</p>
+                )}
+                {savedMeetingError && (
+                  <p className="text-sm font-semibold text-coral">{savedMeetingError}</p>
                 )}
 
                 {selectedDraft && (
@@ -564,7 +750,51 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
                         <Trash2 className="h-4 w-4" />
                         Delete draft
                       </button>
+                      <button
+                        className="inline-flex h-11 w-fit items-center justify-center gap-2 rounded-md bg-ocean px-4 text-sm font-semibold text-white transition hover:bg-[#245b76] disabled:opacity-55"
+                        disabled={!user || savingDraftId === selectedDraft.id}
+                        onClick={() => saveDraft(selectedDraft)}
+                        type="button"
+                      >
+                        <Save className="h-4 w-4" />
+                        {savingDraftId === selectedDraft.id ? "Saving" : "Save permanently"}
+                      </button>
                     </div>
+                    {!user && (
+                      <p className="text-sm font-medium text-graphite">
+                        Sign in with Google before saving this draft permanently.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {selectedSavedMeeting && (
+                  <div className="grid gap-3">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-graphite">
+                      <Cloud className="h-4 w-4 text-ocean" />
+                      {selectedSavedMeeting.title}
+                    </div>
+                    {selectedSavedMeeting.signedAudioUrl ? (
+                      <audio
+                        aria-label={`Saved audio for ${selectedSavedMeeting.title}`}
+                        className="w-full"
+                        controls
+                        src={selectedSavedMeeting.signedAudioUrl}
+                      />
+                    ) : (
+                      <p className="text-sm font-medium text-graphite">
+                        Audio is saved, but no playable signed URL is available.
+                      </p>
+                    )}
+                    <button
+                      className="inline-flex h-11 w-fit items-center justify-center gap-2 rounded-md border border-coral/35 bg-white px-4 text-sm font-semibold text-coral transition hover:bg-coral hover:text-white disabled:opacity-55"
+                      disabled={deletingSavedMeetingId === selectedSavedMeeting.id}
+                      onClick={() => deleteSavedMeeting(selectedSavedMeeting)}
+                      type="button"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      {deletingSavedMeetingId === selectedSavedMeeting.id ? "Deleting" : "Delete saved meeting"}
+                    </button>
                   </div>
                 )}
               </div>
@@ -592,17 +822,23 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
               </div>
               <div className="flex items-center justify-between gap-3 border-t border-white/12 pt-3">
                 <dt className="text-white/65">Audio</dt>
-                <dd className="font-semibold">{selectedDraft ? "Captured" : "Not captured"}</dd>
+                <dd className="font-semibold">
+                  {selectedDraft || selectedSavedMeeting ? "Captured" : "Not captured"}
+                </dd>
               </div>
               <div className="flex items-center justify-between gap-3 border-t border-white/12 pt-3">
                 <dt className="text-white/65">Local drafts</dt>
                 <dd className="font-semibold">{meetingDrafts.length}</dd>
               </div>
+              <div className="flex items-center justify-between gap-3 border-t border-white/12 pt-3">
+                <dt className="text-white/65">Saved</dt>
+                <dd className="font-semibold">{savedMeetings.length}</dd>
+              </div>
             </dl>
 
             <div className="rounded-md bg-white/9 p-4 text-sm leading-6 text-white/78">
-              Saved meetings will store title, date, duration, transcript, summary,
-              action items, decisions, and topics.
+              Saved meetings store audio and metadata now. Transcript, summary,
+              action items, decisions, and topics come next.
             </div>
 
             <div className="border-t border-white/12 pt-4">
@@ -684,7 +920,7 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
               <div className="mt-3 flex items-start gap-2 text-xs leading-5 text-white/62">
                 <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-mint" />
                 {user
-                  ? "Permanent save will use this account in Step 7."
+                  ? "Permanent saves use this account."
                   : "Sign in before saving recordings permanently."}
               </div>
             </div>
@@ -695,7 +931,7 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-sm font-semibold uppercase text-ocean">Local drafts</p>
-              <h2 className="mt-1 text-2xl font-semibold text-ink">Meeting history</h2>
+              <h2 className="mt-1 text-2xl font-semibold text-ink">Draft recordings</h2>
             </div>
             <p className="text-sm font-medium text-graphite">
               {meetingDrafts.length === 0
@@ -727,6 +963,7 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
                         className="grid min-w-0 gap-2 text-left"
                         onClick={() => {
                           setSelectedDraftId(draft.id);
+                          setSelectedSavedMeetingId(null);
                           setElapsedSeconds(draft.durationSeconds);
                         }}
                         type="button"
@@ -750,6 +987,7 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
                           className="inline-flex h-10 items-center justify-center rounded-md border border-ink/15 bg-white px-3 text-sm font-semibold text-graphite transition hover:border-ocean/50 hover:text-ocean"
                           onClick={() => {
                             setSelectedDraftId(draft.id);
+                            setSelectedSavedMeetingId(null);
                             setElapsedSeconds(draft.durationSeconds);
                           }}
                           type="button"
@@ -764,6 +1002,15 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
+                        <button
+                          className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-ocean px-3 text-sm font-semibold text-white transition hover:bg-[#245b76] disabled:opacity-55"
+                          disabled={!user || savingDraftId === draft.id}
+                          onClick={() => saveDraft(draft)}
+                          type="button"
+                        >
+                          <Save className="h-4 w-4" />
+                          {savingDraftId === draft.id ? "Saving" : "Save"}
+                        </button>
                       </div>
                     </div>
 
@@ -773,6 +1020,127 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
                         className="w-full"
                         controls
                         src={draft.audioUrl}
+                      />
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-lg border border-ink/10 bg-white/82 p-5 shadow-panel backdrop-blur sm:p-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold uppercase text-ocean">Supabase</p>
+              <h2 className="mt-1 text-2xl font-semibold text-ink">Saved meetings</h2>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <p className="text-sm font-medium text-graphite">
+                {!user
+                  ? "Sign in to load saved meetings"
+                  : isSavedMeetingsLoading
+                    ? "Loading"
+                    : `${savedMeetings.length} saved`}
+              </p>
+              <button
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-ink/15 bg-white px-3 text-sm font-semibold text-graphite transition hover:border-ocean/50 hover:text-ocean disabled:opacity-45"
+                disabled={!user || isSavedMeetingsLoading}
+                onClick={() => setSavedMeetingsRefreshKey((current) => current + 1)}
+                type="button"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          {savedMeetingError && (
+            <p className="mt-4 rounded-md bg-[#fff0ec] px-4 py-3 text-sm font-semibold text-coral">
+              {savedMeetingError}
+            </p>
+          )}
+
+          {!user ? (
+            <div className="mt-5 rounded-lg border border-dashed border-ink/20 bg-cloud p-6 text-sm font-medium text-graphite">
+              Sign in with Google to save and reload meeting recordings.
+            </div>
+          ) : savedMeetings.length === 0 ? (
+            <div className="mt-5 rounded-lg border border-dashed border-ink/20 bg-cloud p-6 text-sm font-medium text-graphite">
+              Saved meetings will appear here after you save a draft.
+            </div>
+          ) : (
+            <div className="mt-5 grid gap-3">
+              {savedMeetings.map((meeting) => {
+                const isSelected = meeting.id === selectedSavedMeetingId;
+
+                return (
+                  <article
+                    className={`grid gap-3 rounded-lg border p-4 transition ${
+                      isSelected
+                        ? "border-ocean bg-mint/70"
+                        : "border-ink/10 bg-cloud hover:border-ocean/45"
+                    }`}
+                    key={meeting.id}
+                  >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <button
+                        className="grid min-w-0 gap-2 text-left"
+                        onClick={() => {
+                          setSelectedSavedMeetingId(meeting.id);
+                          setSelectedDraftId(null);
+                          setElapsedSeconds(meeting.duration_seconds);
+                        }}
+                        type="button"
+                      >
+                        <span className="break-words text-lg font-semibold text-ink">
+                          {meeting.title}
+                        </span>
+                        <span className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm font-medium text-graphite">
+                          <span className="inline-flex items-center gap-1.5">
+                            <CalendarDays className="h-4 w-4 text-ocean" />
+                            {formatDraftDate(meeting.created_at)}
+                          </span>
+                          <span>{meeting.language}</span>
+                          <span className="font-mono">
+                            {formatDuration(meeting.duration_seconds)}
+                          </span>
+                          {meeting.audio_size_bytes && (
+                            <span>{formatBytes(meeting.audio_size_bytes)}</span>
+                          )}
+                        </span>
+                      </button>
+
+                      <div className="flex shrink-0 gap-2">
+                        <button
+                          className="inline-flex h-10 items-center justify-center rounded-md border border-ink/15 bg-white px-3 text-sm font-semibold text-graphite transition hover:border-ocean/50 hover:text-ocean"
+                          onClick={() => {
+                            setSelectedSavedMeetingId(meeting.id);
+                            setSelectedDraftId(null);
+                            setElapsedSeconds(meeting.duration_seconds);
+                          }}
+                          type="button"
+                        >
+                          Select
+                        </button>
+                        <button
+                          className="inline-flex h-10 min-w-10 items-center justify-center rounded-md border border-coral/35 bg-white px-3 text-sm font-semibold text-coral transition hover:bg-coral hover:text-white disabled:opacity-55"
+                          disabled={deletingSavedMeetingId === meeting.id}
+                          onClick={() => deleteSavedMeeting(meeting)}
+                          title="Delete saved meeting"
+                          type="button"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {isSelected && meeting.signedAudioUrl && (
+                      <audio
+                        aria-label={`Saved audio for ${meeting.title}`}
+                        className="w-full"
+                        controls
+                        src={meeting.signedAudioUrl}
                       />
                     )}
                   </article>
