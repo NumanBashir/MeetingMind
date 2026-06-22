@@ -9,7 +9,8 @@ This plan turns `masterplan.md` into an implementation sequence. Each step shoul
 * Step 3: Browser microphone recording - Done
 * Step 4: Local meeting draft storage - Done
 * Step 5: Backend choice and setup - Done
-* Step 6: Authentication - Next
+* Step 6: Authentication - Done
+* Step 7: Persistent recording storage - Next
 
 ---
 
@@ -171,7 +172,7 @@ Acceptance checks:
 
 ## Step 6: Authentication
 
-Status: Next
+Status: Done
 
 Goal:
 Let a user sign in with Google and isolate their meeting data.
@@ -183,17 +184,26 @@ Scope:
 * User profile display
 * Require authentication before saving meetings permanently
 
+Implemented:
+
+* Added Google OAuth sign-in button
+* Added current Supabase session detection
+* Added auth state subscription
+* Added signed-in user display
+* Added sign out
+* Added UI guidance that permanent saving requires authentication
+
 Acceptance checks:
 
 * User can sign in with Google
 * User can sign out
-* Saved meeting records are associated with the signed-in user
+* Persistent saves are gated behind the signed-in user for Step 7
 
 ---
 
 ## Step 7: Persistent Recording Storage
 
-Status: Planned
+Status: Next
 
 Goal:
 Upload recorded audio and save meeting metadata.

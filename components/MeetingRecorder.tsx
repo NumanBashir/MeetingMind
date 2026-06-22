@@ -9,13 +9,18 @@ import {
   FileText,
   KeyRound,
   Languages,
+  LogOut,
   Mic,
+  ShieldCheck,
   Square,
   TimerReset,
   Trash2,
+  UserRound,
 } from "lucide-react";
+import type { User } from "@supabase/supabase-js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PublicEnvStatus } from "@/lib/env";
+import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 const languages = ["English", "Danish", "Urdu"];
 const preferredMimeTypes = [
@@ -119,6 +124,9 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
   const [meetingDrafts, setMeetingDrafts] = useState<MeetingDraft[]>([]);
   const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
   const [recordingError, setRecordingError] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(backendStatus.isConfigured);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -127,6 +135,18 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
   const elapsedSecondsRef = useRef(elapsedSeconds);
   const languageRef = useRef(language);
   const meetingTitleRef = useRef(meetingTitle);
+
+  const supabase = useMemo(() => {
+    if (!backendStatus.isConfigured) {
+      return null;
+    }
+
+    try {
+      return createBrowserSupabaseClient();
+    } catch {
+      return null;
+    }
+  }, [backendStatus.isConfigured]);
 
   useEffect(() => {
     elapsedSecondsRef.current = elapsedSeconds;
@@ -165,6 +185,47 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
       draftAudioUrls.clear();
     };
   }, []);
+
+  useEffect(() => {
+    if (!supabase) {
+      setIsAuthLoading(false);
+      return;
+    }
+
+    const supabaseClient = supabase;
+    let isMounted = true;
+
+    async function loadSession() {
+      setIsAuthLoading(true);
+      const { data, error } = await supabaseClient.auth.getSession();
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (error) {
+        setAuthError(error.message);
+      }
+
+      setUser(data.session?.user ?? null);
+      setIsAuthLoading(false);
+    }
+
+    void loadSession();
+
+    const {
+      data: { subscription },
+    } = supabaseClient.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      setAuthError(null);
+      setIsAuthLoading(false);
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, [supabase]);
 
   const selectedDraft = useMemo(
     () => meetingDrafts.find((draft) => draft.id === selectedDraftId) ?? null,
@@ -309,6 +370,53 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
   const displayedTitle = selectedDraft?.title ?? meetingTitle;
   const displayedLanguage = selectedDraft?.language ?? language;
   const displayedDuration = selectedDraft?.durationSeconds ?? elapsedSeconds;
+  const displayName =
+    typeof user?.user_metadata.name === "string"
+      ? user.user_metadata.name
+      : typeof user?.user_metadata.full_name === "string"
+        ? user.user_metadata.full_name
+        : user?.email ?? "Signed-in user";
+
+  async function signInWithGoogle() {
+    if (!supabase) {
+      setAuthError("Supabase is not configured.");
+      return;
+    }
+
+    setAuthError(null);
+    setIsAuthLoading(true);
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: window.location.origin,
+      },
+    });
+
+    if (error) {
+      setAuthError(error.message);
+      setIsAuthLoading(false);
+    }
+  }
+
+  async function signOut() {
+    if (!supabase) {
+      return;
+    }
+
+    setAuthError(null);
+    setIsAuthLoading(true);
+
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      setAuthError(error.message);
+    } else {
+      setUser(null);
+    }
+
+    setIsAuthLoading(false);
+  }
 
   return (
     <main className="min-h-screen px-4 py-5 sm:px-6 lg:px-8">
@@ -516,7 +624,7 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
 
               <div className="mt-3 grid gap-2 text-sm leading-6 text-white/72">
                 {backendStatus.isConfigured ? (
-                  <p>Supabase client setup is ready for authenticated storage.</p>
+                  <p>Supabase is ready for authenticated storage.</p>
                 ) : (
                   <p>Copy `.env.example` to `.env.local` and add Supabase project values.</p>
                 )}
@@ -530,14 +638,55 @@ export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
                 )}
               </div>
 
-              <button
-                className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-md border border-white/16 bg-white/8 px-4 text-sm font-semibold text-white/70"
-                disabled
-                type="button"
-              >
-                <KeyRound className="h-4 w-4" />
-                Google Sign-In in Step 6
-              </button>
+              <div className="mt-4 rounded-md border border-white/12 bg-white/7 p-3">
+                {user ? (
+                  <div className="grid gap-3">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-mint text-ink">
+                        <UserRound className="h-5 w-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-white">{displayName}</p>
+                        {user.email && (
+                          <p className="truncate text-xs font-medium text-white/62">{user.email}</p>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-white/16 bg-white px-3 text-sm font-semibold text-ink transition hover:bg-mint disabled:opacity-55"
+                      disabled={isAuthLoading}
+                      onClick={signOut}
+                      type="button"
+                    >
+                      <LogOut className="h-4 w-4" />
+                      Sign out
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-ink transition hover:bg-mint disabled:opacity-55"
+                    disabled={!backendStatus.isConfigured || isAuthLoading}
+                    onClick={signInWithGoogle}
+                    type="button"
+                  >
+                    <KeyRound className="h-4 w-4" />
+                    {isAuthLoading ? "Checking session" : "Sign in with Google"}
+                  </button>
+                )}
+
+                {authError && (
+                  <p className="mt-3 text-xs font-semibold leading-5 text-[#ffd7ce]">
+                    {authError}
+                  </p>
+                )}
+              </div>
+
+              <div className="mt-3 flex items-start gap-2 text-xs leading-5 text-white/62">
+                <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-mint" />
+                {user
+                  ? "Permanent save will use this account in Step 7."
+                  : "Sign in before saving recordings permanently."}
+              </div>
             </div>
           </aside>
         </section>
