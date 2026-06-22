@@ -3,9 +3,11 @@
 import {
   Clock,
   CalendarDays,
+  Cloud,
   Download,
   FileAudio,
   FileText,
+  KeyRound,
   Languages,
   Mic,
   Square,
@@ -13,6 +15,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { PublicEnvStatus } from "@/lib/env";
 
 const languages = ["English", "Danish", "Urdu"];
 const preferredMimeTypes = [
@@ -32,6 +35,10 @@ type MeetingDraft = {
   audioMimeType: string;
   fileName: string;
   sizeBytes: number;
+};
+
+type MeetingRecorderProps = {
+  backendStatus: PublicEnvStatus;
 };
 
 function formatDuration(totalSeconds: number) {
@@ -103,7 +110,7 @@ function createDraftId() {
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export function MeetingRecorder() {
+export function MeetingRecorder({ backendStatus }: MeetingRecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [isPreparing, setIsPreparing] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -488,6 +495,49 @@ export function MeetingRecorder() {
             <div className="rounded-md bg-white/9 p-4 text-sm leading-6 text-white/78">
               Saved meetings will store title, date, duration, transcript, summary,
               action items, decisions, and topics.
+            </div>
+
+            <div className="border-t border-white/12 pt-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                  <Cloud className="h-4 w-4 text-mint" />
+                  Backend
+                </div>
+                <span
+                  className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                    backendStatus.isConfigured
+                      ? "bg-mint text-ink"
+                      : "bg-coral/20 text-[#ffd7ce]"
+                  }`}
+                >
+                  {backendStatus.isConfigured ? "Configured" : "Missing env"}
+                </span>
+              </div>
+
+              <div className="mt-3 grid gap-2 text-sm leading-6 text-white/72">
+                {backendStatus.isConfigured ? (
+                  <p>Supabase client setup is ready for authenticated storage.</p>
+                ) : (
+                  <p>Copy `.env.example` to `.env.local` and add Supabase project values.</p>
+                )}
+
+                {backendStatus.missingKeys.length > 0 && (
+                  <ul className="grid gap-1 font-mono text-xs text-[#ffd7ce]">
+                    {backendStatus.missingKeys.map((key) => (
+                      <li key={key}>{key}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <button
+                className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-md border border-white/16 bg-white/8 px-4 text-sm font-semibold text-white/70"
+                disabled
+                type="button"
+              >
+                <KeyRound className="h-4 w-4" />
+                Google Sign-In in Step 6
+              </button>
             </div>
           </aside>
         </section>

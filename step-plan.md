@@ -8,7 +8,8 @@ This plan turns `masterplan.md` into an implementation sequence. Each step shoul
 * Step 2: Next.js app scaffold - Done
 * Step 3: Browser microphone recording - Done
 * Step 4: Local meeting draft storage - Done
-* Step 5: Backend choice and setup - Next
+* Step 5: Backend choice and setup - Done
+* Step 6: Authentication - Next
 
 ---
 
@@ -130,7 +131,7 @@ Acceptance checks:
 
 ## Step 5: Backend Choice And Setup
 
-Status: Next
+Status: Done
 
 Goal:
 Add persistent user-owned storage.
@@ -148,6 +149,18 @@ Scope:
 * Add database schema notes or migrations
 * Add auth placeholder flow
 
+Implemented:
+
+* Added `@supabase/supabase-js`
+* Added `.env.example`
+* Added typed environment helpers
+* Added browser and server Supabase client helpers
+* Added database TypeScript types
+* Added `supabase/schema.sql`
+* Added Supabase setup notes
+* Added `/api/backend/status`
+* Added backend setup status and Google Sign-In placeholder in the app
+
 Acceptance checks:
 
 * App can connect to Supabase with env vars
@@ -158,7 +171,7 @@ Acceptance checks:
 
 ## Step 6: Authentication
 
-Status: Planned
+Status: Next
 
 Goal:
 Let a user sign in with Google and isolate their meeting data.
